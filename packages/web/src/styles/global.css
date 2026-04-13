@@ -165,3 +165,4 @@ h2 { font-size: 1.25rem; margin: 2rem 0 0.75rem; color: var(--muted); text-trans
   margin-top: 0.1rem;
 }
 .step-text { padding-top: 0.2rem; }
+a.recipe-link { color: var(--accent); font-weight: 500; text-underline-offset: 2px; }

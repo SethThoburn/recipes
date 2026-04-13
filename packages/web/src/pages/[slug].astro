@@ -1,7 +1,7 @@
 ---
 import Layout from '../layouts/Layout.astro';
 import { getAllRecipes, getRecipeBySlug } from '../lib/recipes';
-import type { Recipe } from '../lib/recipes';
+import type { Recipe, StepItem } from '../lib/recipes';
 
 export async function getStaticPaths() {
   const recipes = getAllRecipes();
@@ -35,15 +35,20 @@ if (!recipe) return Astro.redirect('/');
   <ul class="ingredient-list">
     {recipe.ingredients.map((ing) => (
       <li class="ingredient-item">
-        <span
-          class="ingredient-amount"
-          data-quantity={ing.quantity ?? ''}
-          data-unit={ing.unit}
-          data-raw={ing.raw}
-        >
-          {ing.raw || '—'}
-        </span>
-        <span class="ingredient-name">{ing.name}</span>
+        {ing.recipeSlug ? (
+          <span class="ingredient-amount">→</span>
+          <a href={`${import.meta.env.BASE_URL}${ing.recipeSlug}`} class="ingredient-name recipe-link">{ing.name}</a>
+        ) : (
+          <span
+            class="ingredient-amount"
+            data-quantity={ing.quantity ?? ''}
+            data-unit={ing.unit}
+            data-raw={ing.raw}
+          >
+            {ing.raw || '—'}
+          </span>
+          <span class="ingredient-name">{ing.name}</span>
+        )}
       </li>
     ))}
   </ul>
@@ -54,7 +59,17 @@ if (!recipe) return Astro.redirect('/');
     {recipe.steps.map((step, i) => (
       <li class="step-item">
         <span class="step-num">{i + 1}</span>
-        <span class="step-text">{step.description}</span>
+        <span class="step-text">
+          {step.items.map((item: StepItem) => {
+            if (item.type === 'recipe-link') {
+              return <a href={`${import.meta.env.BASE_URL}${item.slug}`} class="recipe-link">{item.name}</a>;
+            }
+            if (item.type === 'text') return item.value;
+            if (item.type === 'ingredient') return <span class="step-ingredient">{item.name}</span>;
+            if (item.type === 'cookware') return <span class="step-cookware">{item.name}</span>;
+            if (item.type === 'timer') return <span class="step-timer">{item.display}</span>;
+          })}
+        </span>
       </li>
     ))}
   </ol>

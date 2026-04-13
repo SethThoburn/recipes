@@ -2,120 +2,46 @@ import { readFileSync, readdirSync } from 'node:fs';
 import { join, resolve, basename, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import matter from 'gray-matter';
+import {
+  CooklangParser,
+  getFlatIngredients,
+  ingredient_display_name,
+  cookware_display_name,
+  quantity_display,
+} from '@cooklang/cooklang';
+import type { CooklangRecipe, Step as CooklangStep, Content } from '@cooklang/cooklang';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const RECIPES_DIR = resolve(__dirname, '../../../recipes');
 
+const parser = new CooklangParser();
+
 export interface Ingredient {
   name: string;
-  /** Raw amount string from the .cook file, e.g. "100g", "2", "1 cup" */
   raw: string;
-  /** Numeric quantity extracted from raw, or null if not parseable */
   quantity: number | null;
-  /** Unit string extracted from raw, or empty string */
   unit: string;
+  /** Set when this ingredient is a reference to another recipe */
+  recipeSlug?: string;
 }
 
+export type StepItem =
+  | { type: 'text'; value: string }
+  | { type: 'recipe-link'; name: string; slug: string }
+  | { type: 'ingredient'; name: string }
+  | { type: 'cookware'; name: string }
+  | { type: 'timer'; display: string };
+
 export interface Step {
-  description: string;
+  items: StepItem[];
 }
 
 export interface Recipe {
   slug: string;
   title: string;
-  /** Base serving count from frontmatter */
   servings: number;
   ingredients: Ingredient[];
   steps: Step[];
-}
-
-/**
- * Minimal cooklang body parser.
- *
- * Supports:
- *   @ingredient{quantity%unit}  →  ingredient with amount "quantity unit"
- *   @ingredient{amount}         →  ingredient with raw amount string
- *   @ingredient{}               →  ingredient, no amount
- *   @ingredient                 →  single-word ingredient, no amount
- *   #cookware / ~{timer}        →  stripped from step text (not tracked)
- *   >> key: value               →  metadata (ignored here; we use frontmatter)
- */
-function parseCooklang(body: string): {
-  ingredients: Array<{ name: string; amount: string }>;
-  steps: Array<{ description: string }>;
-} {
-  const ingredients: Array<{ name: string; amount: string }> = [];
-  const seen = new Set<string>();
-  const steps: Array<{ description: string }> = [];
-
-  // Regex for @ingredient{...} or @word (no braces)
-  const ingRe = /@([^@#~{}|\s]+)(?:\{([^}]*)\})?/g;
-  // Regex for #cookware{...} or #word
-  const cookwareRe = /#([^@#~{}|\s]+)(?:\{[^}]*\})?/g;
-  // Regex for ~{time%unit} or ~{time}
-  const timerRe = /~\{[^}]*\}/g;
-
-  for (const rawLine of body.split('\n')) {
-    const line = rawLine.trim();
-    if (!line || line.startsWith('--')) continue;  // blank or comment
-    if (line.startsWith('>>')) continue;            // metadata line
-
-    // Extract ingredients from this step
-    let match: RegExpExecArray | null;
-    ingRe.lastIndex = 0;
-    while ((match = ingRe.exec(line)) !== null) {
-      const name = match[1].replace(/-/g, ' ').trim();
-      const amountRaw = match[2] ?? '';
-      // amount can be "qty%unit" or just a value
-      const amount = amountRaw.includes('%')
-        ? amountRaw.replace('%', '')  // "100%g" → "100g"
-        : amountRaw;
-
-      const key = name.toLowerCase();
-      if (!seen.has(key)) {
-        seen.add(key);
-        ingredients.push({ name, amount: amount.trim() });
-      }
-    }
-
-    // Build human-readable step text by replacing cooklang tokens with plain text
-    const stepText = line
-      .replace(ingRe, (_, name) => name.replace(/-/g, ' '))
-      .replace(cookwareRe, (_, name) => name.replace(/-/g, ' '))
-      .replace(timerRe, (t) => {
-        // ~{30%minutes} → "30 minutes", ~{8} → "8"
-        const inner = t.slice(2, -1);
-        return inner.replace('%', ' ');
-      })
-      .trim();
-
-    if (stepText) steps.push({ description: stepText });
-  }
-
-  return { ingredients, steps };
-}
-
-/** Parse a raw amount string like "100g", "2 cups", "1/2" */
-function parseAmount(raw: string): { quantity: number | null; unit: string } {
-  if (!raw || raw.trim() === '' || raw.toLowerCase() === 'some') {
-    return { quantity: null, unit: '' };
-  }
-
-  const match = raw.trim().match(/^([\d]+(?:[./][\d]+)?(?:\.\d+)?)\s*([a-zA-Z%]*)$/);
-  if (!match) return { quantity: null, unit: raw.trim() };
-
-  const numStr = match[1];
-  const unit = match[2] ?? '';
-
-  let quantity: number;
-  if (numStr.includes('/')) {
-    const [num, den] = numStr.split('/').map(Number);
-    quantity = num / den;
-  } else {
-    quantity = parseFloat(numStr);
-  }
-
-  return { quantity: isNaN(quantity) ? null : quantity, unit };
 }
 
 function slugify(name: string): string {
@@ -123,6 +49,38 @@ function slugify(name: string): string {
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, '-')
     .replace(/^-|-$/g, '');
+}
+
+function stepToItems(
+  step: CooklangStep,
+  recipe: CooklangRecipe,
+): StepItem[] {
+  return (step.items as Array<{ type: string; value?: string; index?: number }>).map((item) => {
+    switch (item.type) {
+      case 'text':
+        return { type: 'text', value: item.value ?? '' } satisfies StepItem;
+      case 'ingredient': {
+        const ing = recipe.ingredients[item.index!];
+        // Recipe references (@./Name{}) have a non-null `reference` field
+        if (ing.reference !== null && ing.reference !== undefined) {
+          const recipeName: string = ing.reference.name ?? ing.name;
+          return { type: 'recipe-link', name: recipeName, slug: slugify(recipeName) } satisfies StepItem;
+        }
+        return { type: 'ingredient', name: ingredient_display_name(ing) } satisfies StepItem;
+      }
+      case 'cookware': {
+        const cw = recipe.cookware[item.index!];
+        return { type: 'cookware', name: cookware_display_name(cw) } satisfies StepItem;
+      }
+      case 'timer': {
+        const tm = recipe.timers[item.index!];
+        const display = tm.quantity ? quantity_display(tm.quantity) : (tm.name ?? '');
+        return { type: 'timer', display } satisfies StepItem;
+      }
+      default:
+        return { type: 'text', value: '' } satisfies StepItem;
+    }
+  });
 }
 
 function parseRecipeFile(filePath: string): Recipe {
@@ -134,12 +92,22 @@ function parseRecipeFile(filePath: string): Recipe {
   const servings: number = Number(frontmatter.servings) || 1;
   const slug = slugify(title);
 
-  const { ingredients: rawIngredients, steps } = parseCooklang(body);
+  const [recipe] = parser.parse(body);
 
-  const ingredients: Ingredient[] = rawIngredients.map((ing) => {
-    const { quantity, unit } = parseAmount(ing.amount);
-    return { name: ing.name, raw: ing.amount, quantity, unit };
+  const ingredients: Ingredient[] = getFlatIngredients(recipe).map((ing, i) => {
+    const rawIng = recipe.ingredients[i] as { reference: { name: string } | null };
+    if (rawIng.reference !== null && rawIng.reference !== undefined) {
+      const recipeName = rawIng.reference.name ?? ing.name;
+      return { name: recipeName, raw: '', quantity: null, unit: '', recipeSlug: slugify(recipeName) };
+    }
+    return { name: ing.name, raw: ing.displayText ?? '', quantity: ing.quantity, unit: ing.unit ?? '' };
   });
+
+  const steps: Step[] = recipe.sections.flatMap((section) =>
+    (section.content as Content[])
+      .filter((c): c is { type: 'step'; value: CooklangStep } => c.type === 'step')
+      .map((c) => ({ items: stepToItems(c.value, recipe) }))
+  );
 
   return { slug, title, servings, ingredients, steps };
 }

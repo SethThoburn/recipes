@@ -8,10 +8,12 @@
     "preview": "astro preview"
   },
   "dependencies": {
+    "@cooklang/cooklang": "^0.17.2",
     "astro": "^4.16.0",
     "gray-matter": "^4.0.3"
   },
   "devDependencies": {
-    "@types/node": "^20.0.0"
+    "@types/node": "^20.0.0",
+    "vite-plugin-wasm": "^3.6.0"
   }
 }
