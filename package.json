@@ -1,0 +1,9 @@
+{
+  "name": "recipes-monorepo",
+  "private": true,
+  "engines": {
+    "node": ">=20",
+    "pnpm": ">=8"
+  },
+  "packageManager": "pnpm@8.15.7"
+}

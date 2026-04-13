@@ -1,0 +1,19 @@
+---
+import Layout from '../layouts/Layout.astro';
+import { getAllRecipes } from '../lib/recipes';
+
+const recipes = getAllRecipes();
+const base = import.meta.env.BASE_URL;
+---
+<Layout title="Recipes">
+  <h1>Recipes</h1>
+  <p style="color: var(--muted); margin-bottom: 1.5rem;">{recipes.length} recipe{recipes.length !== 1 ? 's' : ''}</p>
+  <div class="recipe-grid">
+    {recipes.map((r) => (
+      <a class="recipe-card" href={`${base}${r.slug}`}>
+        <span class="recipe-card-title">{r.title}</span>
+        <span class="recipe-card-meta">serves {r.servings} &rsaquo;</span>
+      </a>
+    ))}
+  </div>
+</Layout>

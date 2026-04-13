@@ -1,0 +1,108 @@
+---
+import Layout from '../layouts/Layout.astro';
+import { getAllRecipes, getRecipeBySlug } from '../lib/recipes';
+import type { Recipe } from '../lib/recipes';
+
+export async function getStaticPaths() {
+  const recipes = getAllRecipes();
+  return recipes.map((r: Recipe) => ({ params: { slug: r.slug } }));
+}
+
+const { slug } = Astro.params;
+const recipe = getRecipeBySlug(slug!);
+if (!recipe) return Astro.redirect('/');
+---
+<Layout title={recipe.title}>
+  <div class="recipe-header">
+    <a href={import.meta.env.BASE_URL} style="color: var(--muted); font-size: 0.85rem; text-decoration: none;">← All recipes</a>
+    <h1>{recipe.title}</h1>
+    <span class="servings-badge">Serves {recipe.servings}</span>
+  </div>
+
+  <!-- Scaling control -->
+  <div class="scale-control">
+    <span class="scale-label">Scale</span>
+    <button class="scale-btn" id="scale-down" aria-label="Decrease">−</button>
+    <span class="scale-display" id="scale-display">×1</span>
+    <button class="scale-btn" id="scale-up" aria-label="Increase">+</button>
+    <span class="scale-label" id="serving-display" style="margin-left:0.5rem">
+      {recipe.servings} serving{recipe.servings !== 1 ? 's' : ''}
+    </span>
+  </div>
+
+  <!-- Ingredients -->
+  <h2>Ingredients</h2>
+  <ul class="ingredient-list">
+    {recipe.ingredients.map((ing) => (
+      <li class="ingredient-item">
+        <span
+          class="ingredient-amount"
+          data-quantity={ing.quantity ?? ''}
+          data-unit={ing.unit}
+          data-raw={ing.raw}
+        >
+          {ing.raw || '—'}
+        </span>
+        <span class="ingredient-name">{ing.name}</span>
+      </li>
+    ))}
+  </ul>
+
+  <!-- Steps -->
+  <h2>Steps</h2>
+  <ol class="step-list">
+    {recipe.steps.map((step, i) => (
+      <li class="step-item">
+        <span class="step-num">{i + 1}</span>
+        <span class="step-text">{step.description}</span>
+      </li>
+    ))}
+  </ol>
+</Layout>
+
+<script define:vars={{ baseServings: recipe.servings }}>
+  // Scaling steps: 0.25, 0.5, 0.75, 1, 1.5, 2, 3, 4
+  const STEPS = [0.25, 0.5, 0.75, 1, 1.5, 2, 3, 4];
+  let stepIdx = STEPS.indexOf(1);
+
+  const display = document.getElementById('scale-display');
+  const servingDisplay = document.getElementById('serving-display');
+  const btnDown = document.getElementById('scale-down');
+  const btnUp = document.getElementById('scale-up');
+  const amounts = document.querySelectorAll('.ingredient-amount');
+
+  function formatAmount(qty, unit) {
+    // Round to 3 significant figures, drop trailing zeros
+    const rounded = parseFloat(qty.toPrecision(3));
+    const str = rounded % 1 === 0 ? rounded.toFixed(0) : rounded.toString();
+    return unit ? `${str}${unit}` : str;
+  }
+
+  function update() {
+    const factor = STEPS[stepIdx];
+    const label = factor === Math.floor(factor) ? `×${factor}` : `×${factor}`;
+    display.textContent = label;
+
+    const servings = baseServings * factor;
+    const servStr = parseFloat(servings.toPrecision(3));
+    servingDisplay.textContent = `${servStr % 1 === 0 ? servStr.toFixed(0) : servStr} serving${servStr !== 1 ? 's' : ''}`;
+
+    btnDown.disabled = stepIdx === 0;
+    btnUp.disabled = stepIdx === STEPS.length - 1;
+
+    amounts.forEach((el) => {
+      const qty = parseFloat(el.dataset.quantity);
+      const unit = el.dataset.unit || '';
+      const raw = el.dataset.raw || '';
+      if (!isNaN(qty) && qty > 0) {
+        el.textContent = formatAmount(qty * factor, unit);
+      } else {
+        // No parseable quantity — show raw unchanged
+        el.textContent = raw || '—';
+      }
+    });
+  }
+
+  btnDown.addEventListener('click', () => { if (stepIdx > 0) { stepIdx--; update(); } });
+  btnUp.addEventListener('click', () => { if (stepIdx < STEPS.length - 1) { stepIdx++; update(); } });
+</script>
