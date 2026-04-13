@@ -241,15 +241,9 @@ if (!recipe) return Astro.redirect('/');
     } catch {}
   }
 
-  async function notify(label) {
-    // Prefer SW notification (survives screen lock on Android / installed PWA)
-    if ('serviceWorker' in navigator) {
-      const reg = await navigator.serviceWorker.ready.catch(() => null);
-      if (reg) { reg.showNotification('Timer done!', { body: label, vibrate: [200, 100, 200], requireInteraction: true }); return; }
-    }
-    if ('Notification' in window && Notification.permission === 'granted') {
-      new Notification('Timer done!', { body: label });
-    }
+  async function getSWReg() {
+    if (!('serviceWorker' in navigator)) return null;
+    return navigator.serviceWorker.ready.catch(() => null);
   }
 
   async function ensureNotificationPermission() {
@@ -265,8 +259,15 @@ if (!recipe) return Astro.redirect('/');
     setTimeout(() => card.remove(), 260);
   }
 
-  function startTimer(totalSeconds, label) {
+  async function startTimer(totalSeconds, label) {
+    const id = `timer-${Date.now()}-${Math.random().toString(36).slice(2)}`;
     const endTime = Date.now() + totalSeconds * 1000;
+
+    // Schedule OS-level notification via SW (fires even when screen is locked)
+    const reg = await getSWReg();
+    if (reg) {
+      reg.active?.postMessage({ type: 'timer-start', id, endTime, label });
+    }
 
     const card = document.createElement('div');
     card.className = 'timer-card';
@@ -297,7 +298,16 @@ if (!recipe) return Astro.redirect('/');
         card.classList.add('done');
         timeEl.textContent = 'Done!';
         chime();
-        notify(label);
+        // If TimestampTrigger is available the SW already scheduled the notification.
+        // Only fire a fallback notification from the page when it isn't.
+        if (!('TimestampTrigger' in window)) {
+          const r = await getSWReg();
+          if (r) {
+            r.active?.postMessage({ type: 'timer-done', label });
+          } else if ('Notification' in window && Notification.permission === 'granted') {
+            new Notification('Timer done!', { body: label });
+          }
+        }
         setTimeout(() => dismissCard(card), 4000);
       }
     }
@@ -309,8 +319,13 @@ if (!recipe) return Astro.redirect('/');
     const onVisible = () => { if (!document.hidden && !finished) tick(); };
     document.addEventListener('visibilitychange', onVisible);
 
-    card.querySelector('.timer-close').addEventListener('click', () => {
-      if (!finished) clearInterval(interval);
+    card.querySelector('.timer-close').addEventListener('click', async () => {
+      if (!finished) {
+        clearInterval(interval);
+        // Cancel the pending OS notification
+        const r = await getSWReg();
+        if (r) r.active?.postMessage({ type: 'timer-cancel', id });
+      }
       document.removeEventListener('visibilitychange', onVisible);
       dismissCard(card);
     });
