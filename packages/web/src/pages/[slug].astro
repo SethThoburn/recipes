@@ -21,13 +21,10 @@ if (!recipe) return Astro.redirect('/');
 
   <!-- Scaling control -->
   <div class="scale-control">
-    <span class="scale-label">Scale</span>
+    <span class="scale-label">Servings</span>
     <button class="scale-btn" id="scale-down" aria-label="Decrease">−</button>
-    <span class="scale-display" id="scale-display">×1</span>
+    <span class="scale-display" id="serving-display">{recipe.servings}</span>
     <button class="scale-btn" id="scale-up" aria-label="Increase">+</button>
-    <span class="scale-label" id="serving-display" style="margin-left:0.5rem">
-      {recipe.servings} serving{recipe.servings !== 1 ? 's' : ''}
-    </span>
   </div>
 
   <!-- Ingredients -->
@@ -76,34 +73,23 @@ if (!recipe) return Astro.redirect('/');
 </Layout>
 
 <script define:vars={{ baseServings: recipe.servings }}>
-  // Scaling steps: 0.25, 0.5, 0.75, 1, 1.5, 2, 3, 4
-  const STEPS = [0.25, 0.5, 0.75, 1, 1.5, 2, 3, 4];
-  let stepIdx = STEPS.indexOf(1);
+  let currentServings = baseServings;
 
-  const display = document.getElementById('scale-display');
   const servingDisplay = document.getElementById('serving-display');
   const btnDown = document.getElementById('scale-down');
   const btnUp = document.getElementById('scale-up');
   const amounts = document.querySelectorAll('.ingredient-amount');
 
   function formatAmount(qty, unit) {
-    // Round to 3 significant figures, drop trailing zeros
     const rounded = parseFloat(qty.toPrecision(3));
     const str = rounded % 1 === 0 ? rounded.toFixed(0) : rounded.toString();
     return unit ? `${str}${unit}` : str;
   }
 
   function update() {
-    const factor = STEPS[stepIdx];
-    const label = factor === Math.floor(factor) ? `×${factor}` : `×${factor}`;
-    display.textContent = label;
-
-    const servings = baseServings * factor;
-    const servStr = parseFloat(servings.toPrecision(3));
-    servingDisplay.textContent = `${servStr % 1 === 0 ? servStr.toFixed(0) : servStr} serving${servStr !== 1 ? 's' : ''}`;
-
-    btnDown.disabled = stepIdx === 0;
-    btnUp.disabled = stepIdx === STEPS.length - 1;
+    const factor = currentServings / baseServings;
+    servingDisplay.textContent = currentServings;
+    btnDown.disabled = currentServings <= 1;
 
     amounts.forEach((el) => {
       const qty = parseFloat(el.dataset.quantity);
@@ -112,12 +98,11 @@ if (!recipe) return Astro.redirect('/');
       if (!isNaN(qty) && qty > 0) {
         el.textContent = formatAmount(qty * factor, unit);
       } else {
-        // No parseable quantity — show raw unchanged
         el.textContent = raw || '—';
       }
     });
   }
 
-  btnDown.addEventListener('click', () => { if (stepIdx > 0) { stepIdx--; update(); } });
-  btnUp.addEventListener('click', () => { if (stepIdx < STEPS.length - 1) { stepIdx++; update(); } });
+  btnDown.addEventListener('click', () => { if (currentServings > 1) { currentServings--; update(); } });
+  btnUp.addEventListener('click', () => { currentServings++; update(); });
 </script>
