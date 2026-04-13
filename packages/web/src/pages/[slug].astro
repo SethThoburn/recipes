@@ -58,27 +58,140 @@ if (!recipe) return Astro.redirect('/');
         <span class="step-num">{i + 1}</span>
         <span class="step-text">
           {step.items.map((item: StepItem) => {
-            if (item.type === 'recipe-link') {
+            if (item.type === 'recipe-link')
               return <a href={`${import.meta.env.BASE_URL}${item.slug}`} class="recipe-link">{item.name}</a>;
-            }
             if (item.type === 'text') return item.value;
             if (item.type === 'ingredient') return <span class="step-ingredient">{item.name}</span>;
             if (item.type === 'cookware') return <span class="step-cookware">{item.name}</span>;
+            if (item.type === 'timer' && item.seconds)
+              return <button class="timer-btn" data-seconds={item.seconds} data-label={`Step ${i + 1} · ${item.display}`}>⏱ {item.display}</button>;
             if (item.type === 'timer') return <span class="step-timer">{item.display}</span>;
           })}
         </span>
       </li>
     ))}
   </ol>
+
+  <!-- Floating timer panel -->
+  <div id="timer-panel" aria-label="Active timers"></div>
 </Layout>
 
-<script define:vars={{ baseServings: recipe.servings }}>
-  let currentServings = baseServings;
+<style>
+.timer-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3em;
+  background: var(--accent-light);
+  color: var(--accent);
+  border: 1px solid color-mix(in srgb, var(--accent) 30%, transparent);
+  border-radius: 999px;
+  padding: 0.15em 0.65em;
+  font-size: 0.9em;
+  font-family: inherit;
+  cursor: pointer;
+  font-weight: 500;
+  transition: background 0.15s, transform 0.1s;
+  vertical-align: baseline;
+}
+.timer-btn:hover {
+  background: color-mix(in srgb, var(--accent) 20%, transparent);
+  transform: translateY(-1px);
+}
+.timer-btn:active { transform: translateY(0); }
 
+:global(#timer-panel) {
+  position: fixed;
+  bottom: 1.5rem;
+  right: 1.5rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+  z-index: 100;
+  pointer-events: none;
+  align-items: flex-end;
+}
+
+:global(.timer-card) {
+  pointer-events: all;
+  background: #1c1917;
+  color: #fafaf9;
+  border-radius: 12px;
+  width: 210px;
+  box-shadow: 0 8px 32px rgba(0,0,0,0.3);
+  overflow: hidden;
+  animation: tc-in 0.3s cubic-bezier(0.34, 1.4, 0.64, 1) both;
+}
+:global(.timer-card.done .timer-bar-fill) { background: #4ade80; }
+:global(.timer-card.done .timer-time) { color: #4ade80; }
+
+@keyframes tc-in {
+  from { opacity: 0; transform: translateY(0.75rem) scale(0.96); }
+  to   { opacity: 1; transform: none; }
+}
+
+:global(.timer-inner) {
+  padding: 0.85rem 1rem 0.75rem;
+}
+
+:global(.timer-top) {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 0.4rem;
+}
+
+:global(.timer-label) {
+  font-size: 0.68rem;
+  color: #a8a29e;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 140px;
+}
+
+:global(.timer-close) {
+  background: none;
+  border: none;
+  color: #57534e;
+  cursor: pointer;
+  font-size: 0.85rem;
+  padding: 0;
+  line-height: 1;
+  transition: color 0.15s;
+  flex-shrink: 0;
+}
+:global(.timer-close:hover) { color: #fafaf9; }
+
+:global(.timer-time) {
+  font-size: 2.5rem;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.04em;
+  line-height: 1;
+}
+
+:global(.timer-bar-track) {
+  height: 3px;
+  background: rgba(255,255,255,0.08);
+}
+:global(.timer-bar-fill) {
+  height: 100%;
+  background: var(--accent);
+  transition: width 1s linear;
+  width: 100%;
+}
+</style>
+
+<script define:vars={{ baseServings: recipe.servings }}>
+  // ── Scaling ────────────────────────────────────────────────────────────────
+  let currentServings = baseServings;
   const servingDisplay = document.getElementById('serving-display');
   const btnDown = document.getElementById('scale-down');
-  const btnUp = document.getElementById('scale-up');
-  const amounts = document.querySelectorAll('.ingredient-amount');
+  const btnUp   = document.getElementById('scale-up');
+  const amounts  = document.querySelectorAll('.ingredient-amount');
 
   function formatAmount(qty, unit) {
     const rounded = parseFloat(qty.toPrecision(3));
@@ -86,23 +199,100 @@ if (!recipe) return Astro.redirect('/');
     return unit ? `${str}${unit}` : str;
   }
 
-  function update() {
+  function updateScaling() {
     const factor = currentServings / baseServings;
     servingDisplay.textContent = currentServings;
     btnDown.disabled = currentServings <= 1;
-
     amounts.forEach((el) => {
       const qty = parseFloat(el.dataset.quantity);
       const unit = el.dataset.unit || '';
-      const raw = el.dataset.raw || '';
-      if (!isNaN(qty) && qty > 0) {
-        el.textContent = formatAmount(qty * factor, unit);
-      } else {
-        el.textContent = raw || '—';
-      }
+      const raw  = el.dataset.raw  || '';
+      el.textContent = (!isNaN(qty) && qty > 0) ? formatAmount(qty * factor, unit) : (raw || '—');
     });
   }
 
-  btnDown.addEventListener('click', () => { if (currentServings > 1) { currentServings--; update(); } });
-  btnUp.addEventListener('click', () => { currentServings++; update(); });
+  btnDown.addEventListener('click', () => { if (currentServings > 1) { currentServings--; updateScaling(); } });
+  btnUp.addEventListener('click',   () => { currentServings++; updateScaling(); });
+
+  // ── Timers ─────────────────────────────────────────────────────────────────
+  const panel = document.getElementById('timer-panel');
+
+  function fmt(s) {
+    const m = Math.floor(s / 60);
+    const sec = s % 60;
+    return `${m}:${String(sec).padStart(2, '0')}`;
+  }
+
+  function chime() {
+    try {
+      const ctx = new AudioContext();
+      [[0, 523], [0.18, 659], [0.36, 784]].forEach(([t, freq]) => {
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.connect(gain);
+        gain.connect(ctx.destination);
+        osc.type = 'sine';
+        osc.frequency.value = freq;
+        gain.gain.setValueAtTime(0.22, ctx.currentTime + t);
+        gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + t + 0.7);
+        osc.start(ctx.currentTime + t);
+        osc.stop(ctx.currentTime + t + 0.7);
+      });
+    } catch {}
+  }
+
+  function dismissCard(card) {
+    card.style.transition = 'opacity 0.25s ease, transform 0.25s ease';
+    card.style.opacity = '0';
+    card.style.transform = 'translateX(1rem)';
+    setTimeout(() => card.remove(), 260);
+  }
+
+  function startTimer(totalSeconds, label) {
+    const card = document.createElement('div');
+    card.className = 'timer-card';
+    card.innerHTML = `
+      <div class="timer-inner">
+        <div class="timer-top">
+          <span class="timer-label">${label}</span>
+          <button class="timer-close" aria-label="Cancel">✕</button>
+        </div>
+        <div class="timer-time">${fmt(totalSeconds)}</div>
+      </div>
+      <div class="timer-bar-track"><div class="timer-bar-fill"></div></div>
+    `;
+    panel.appendChild(card);
+
+    const timeEl = card.querySelector('.timer-time');
+    const fillEl = card.querySelector('.timer-bar-fill');
+    let left = totalSeconds;
+    let finished = false;
+
+    const interval = setInterval(() => {
+      left--;
+      timeEl.textContent = fmt(left);
+      fillEl.style.width = `${(left / totalSeconds) * 100}%`;
+
+      if (left <= 0 && !finished) {
+        finished = true;
+        clearInterval(interval);
+        card.classList.add('done');
+        timeEl.textContent = 'Done!';
+        chime();
+        setTimeout(() => dismissCard(card), 4000);
+      }
+    }, 1000);
+
+    // Cancel button closes directly over interval — no Map needed
+    card.querySelector('.timer-close').addEventListener('click', () => {
+      if (!finished) clearInterval(interval);
+      dismissCard(card);
+    });
+  }
+
+  document.querySelectorAll('.timer-btn').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      startTimer(Number(btn.dataset.seconds), btn.dataset.label);
+    });
+  });
 </script>

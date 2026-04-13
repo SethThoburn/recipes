@@ -8,6 +8,8 @@ import {
   ingredient_display_name,
   cookware_display_name,
   quantity_display,
+  getQuantityValue,
+  getQuantityUnit,
 } from '@cooklang/cooklang';
 import type { CooklangRecipe, Step as CooklangStep, Content } from '@cooklang/cooklang';
 
@@ -30,7 +32,7 @@ export type StepItem =
   | { type: 'recipe-link'; name: string; slug: string }
   | { type: 'ingredient'; name: string }
   | { type: 'cookware'; name: string }
-  | { type: 'timer'; display: string };
+  | { type: 'timer'; display: string; seconds: number | null };
 
 export interface Step {
   items: StepItem[];
@@ -75,7 +77,17 @@ function stepToItems(
       case 'timer': {
         const tm = recipe.timers[item.index!];
         const display = tm.quantity ? quantity_display(tm.quantity) : (tm.name ?? '');
-        return { type: 'timer', display } satisfies StepItem;
+        let seconds: number | null = null;
+        if (tm.quantity) {
+          const qty = getQuantityValue(tm.quantity);
+          const unit = (getQuantityUnit(tm.quantity) ?? '').toLowerCase();
+          if (qty !== null) {
+            if (unit.startsWith('h')) seconds = Math.round(qty * 3600);
+            else if (unit.startsWith('s')) seconds = Math.round(qty);
+            else seconds = Math.round(qty * 60); // default: minutes
+          }
+        }
+        return { type: 'timer', display, seconds } satisfies StepItem;
       }
       default:
         return { type: 'text', value: '' } satisfies StepItem;
