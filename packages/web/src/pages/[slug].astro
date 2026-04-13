@@ -241,6 +241,23 @@ if (!recipe) return Astro.redirect('/');
     } catch {}
   }
 
+  async function notify(label) {
+    // Prefer SW notification (survives screen lock on Android / installed PWA)
+    if ('serviceWorker' in navigator) {
+      const reg = await navigator.serviceWorker.ready.catch(() => null);
+      if (reg) { reg.showNotification('Timer done!', { body: label, vibrate: [200, 100, 200], requireInteraction: true }); return; }
+    }
+    if ('Notification' in window && Notification.permission === 'granted') {
+      new Notification('Timer done!', { body: label });
+    }
+  }
+
+  async function ensureNotificationPermission() {
+    if ('Notification' in window && Notification.permission === 'default') {
+      await Notification.requestPermission();
+    }
+  }
+
   function dismissCard(card) {
     card.style.transition = 'opacity 0.25s ease, transform 0.25s ease';
     card.style.opacity = '0';
@@ -249,6 +266,8 @@ if (!recipe) return Astro.redirect('/');
   }
 
   function startTimer(totalSeconds, label) {
+    const endTime = Date.now() + totalSeconds * 1000;
+
     const card = document.createElement('div');
     card.className = 'timer-card';
     card.innerHTML = `
@@ -265,11 +284,10 @@ if (!recipe) return Astro.redirect('/');
 
     const timeEl = card.querySelector('.timer-time');
     const fillEl = card.querySelector('.timer-bar-fill');
-    let left = totalSeconds;
     let finished = false;
 
-    const interval = setInterval(() => {
-      left--;
+    function tick() {
+      const left = Math.max(0, Math.ceil((endTime - Date.now()) / 1000));
       timeEl.textContent = fmt(left);
       fillEl.style.width = `${(left / totalSeconds) * 100}%`;
 
@@ -279,19 +297,28 @@ if (!recipe) return Astro.redirect('/');
         card.classList.add('done');
         timeEl.textContent = 'Done!';
         chime();
+        notify(label);
         setTimeout(() => dismissCard(card), 4000);
       }
-    }, 1000);
+    }
 
-    // Cancel button closes directly over interval — no Map needed
+    // Tick every 500ms so the display snaps quickly when returning from background
+    const interval = setInterval(tick, 500);
+
+    // Immediately resync when the page becomes visible again
+    const onVisible = () => { if (!document.hidden && !finished) tick(); };
+    document.addEventListener('visibilitychange', onVisible);
+
     card.querySelector('.timer-close').addEventListener('click', () => {
       if (!finished) clearInterval(interval);
+      document.removeEventListener('visibilitychange', onVisible);
       dismissCard(card);
     });
   }
 
   document.querySelectorAll('.timer-btn').forEach((btn) => {
-    btn.addEventListener('click', () => {
+    btn.addEventListener('click', async () => {
+      await ensureNotificationPermission();
       startTimer(Number(btn.dataset.seconds), btn.dataset.label);
     });
   });
